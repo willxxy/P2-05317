@@ -115,7 +115,7 @@ function render() {
   const messages = [storageWarning, calendarError, state.sources.some(source => source.sample) ? 'You’re exploring a sample calendar. Import yours to make this week your own.' : !state.sources.length ? 'No calendar imported. Plans assume your study hours are free.' : '', plannedMinutes < goal * 60 && +addDays(week, 7) > Date.now() && !calendarError ? `${hours(goal * 60 - plannedMinutes)} hrs of your goal remain unplanned. Try shorter sessions or more study days.` : ''].filter(Boolean);
   $('#notice').hidden = !messages.length;
   $('#notice').textContent = messages.join(' ');
-  renderCalendar(events, active);
+  renderCalendar(events.filter(item => !active.some(session => session.id === item.id)), active);
   renderSessions(sessions);
   renderNext(sessions);
   renderRhythm();

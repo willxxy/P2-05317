@@ -41,8 +41,11 @@ export function readCalendar(text, rangeStart, rangeEnd, sourceId = 'calendar') 
     const end = +endDate.toJSDate();
     if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) throw new Error('A calendar event has invalid dates.');
     if (start >= +rangeEnd || end <= +rangeStart || start === end) return;
-    const id = `${sourceId}:${item.uid}:${recurrenceId || start}`;
-    events.set(id, { id, title: item.summary || 'Busy', start, end, allDay: startDate.isDate, location: item.location || '', sourceId });
+    const studyId = item.uid?.endsWith('@margin.local') ? item.uid.slice(0, -'@margin.local'.length) : null;
+    const id = studyId || `${sourceId}:${item.uid}:${recurrenceId || start}`;
+    const entry = { id, title: item.summary || 'Busy', start, end, allDay: startDate.isDate, location: item.location || '', sourceId };
+    if (studyId) Object.assign(entry, { title: entry.title.replace(/^Study: /, ''), status: 'planned', context: 'unspecified', reason: 'Imported study session' });
+    events.set(id, entry);
   }
   for (const component of components) {
     if (component.hasProperty('recurrence-id') || component.getFirstPropertyValue('status') === 'CANCELLED') continue;

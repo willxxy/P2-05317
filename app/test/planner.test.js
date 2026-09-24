@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { defaults, MINUTE, BUFFER, weekStart, addDays, freeWindows, planWeek, recordOutcome, scoreTime, validateSettings, distance, overlaps } from '../src/planner.js';
+import { readCalendar, exportCalendar } from '../src/calendar.js';
 
 const start = new Date(2026, 8, 21);
 const at = (day, hour, minute = 0) => new Date(2026, 8, 21 + day, hour, minute).getTime();
@@ -58,6 +59,58 @@ test('completed and reserved sessions count toward the goal', () => {
   assert.equal(result.sessions.length,4);
   assert.equal(result.remainingMinutes,0);
   assert.ok(result.sessions.every(item=>!overlaps(item,reserved,BUFFER)));
+});
+
+test('reimported study sessions fill the goal without adding or moving sessions', () => {
+  const original = run().sessions;
+  const events = readCalendar(exportCalendar(original), start, addDays(start, 7));
+  const result = run({ events });
+  const times = sessions => sessions.map(({ id, start, end }) => ({ id, start, end }));
+  assert.deepEqual(times(result.sessions), times(original));
+  assert.equal(result.remainingMinutes, 0);
+
+  const reimported = readCalendar(exportCalendar(result.sessions), start, addDays(start, 7));
+  assert.deepEqual(times(run({ events: reimported }).sessions), times(original));
+  assert.deepEqual(reimported.map(item => item.title), events.map(item => item.title));
+});
+
+test('partial imports count once across calendar copies, feedback, and reserved sessions', () => {
+  const original = run().sessions.slice(0, 2);
+  const raw = exportCalendar(original);
+  const events = ['first', 'copy'].flatMap(source => readCalendar(raw, start, addDays(start, 7), source));
+  const imported = run({ events });
+  assert.equal(imported.sessions.length, 6);
+  assert.equal(new Set(imported.sessions.map(item => item.id)).size, 6);
+  for (const session of original) assert.ok(imported.sessions.some(item => item.id === session.id));
+
+  const completed = { ...original[0], status: 'completed' };
+  const reserved = original[1];
+  const result = run({ events, history: [completed], reserved: [reserved], now: reserved.end });
+  assert.equal(result.sessions.length, 4);
+  assert.equal(result.remainingMinutes, 0);
+  assert.ok(result.sessions.every(item => !original.some(session => overlaps(item, session, BUFFER))));
+
+  const skipped = run({ events, history: [{ ...original[0], status: 'skipped' }] });
+  assert.equal(skipped.sessions.length, 6);
+  assert.ok(skipped.sessions.some(item => item.id === reserved.id));
+  assert.ok(skipped.sessions.every(item => !overlaps(item, original[0])));
+});
+
+test('fills a feasible goal even when the preferred slot would fragment free time', () => {
+  const events = [{ start: at(0, 8), end: at(0, 10, 30) }];
+  const result = run({ events, settings: { ...settings, hours: 3, duration: 90, preferred: 'afternoon', days: [1], endHour: 14 } });
+  assert.deepEqual(result.sessions.map(item => [item.start, item.end]), [
+    [at(0, 10, 45), at(0, 12, 15)],
+    [at(0, 12, 30), at(0, 14)],
+  ]);
+  assert.equal(result.remainingMinutes, 0);
+
+  const preferred = run({ events, settings: { ...settings, hours: 1.5, duration: 90, preferred: 'afternoon', days: [1], endHour: 14 } });
+  assert.equal(preferred.sessions[0].start, at(0, 12));
+
+  const overloaded = run({ events, settings: { ...settings, hours: 4.5, duration: 90, preferred: 'afternoon', days: [1], endHour: 14 } });
+  assert.equal(overloaded.sessions.length, 2);
+  assert.equal(overloaded.remainingMinutes, 90);
 });
 
 test('repeated feedback is idempotent and outcomes are validated', () => {

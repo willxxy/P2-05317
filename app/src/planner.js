@@ -73,13 +73,32 @@ export function freeWindows(events, start, settings, now = Date.now()) {
   return windows;
 }
 
+// Equal-length candidates stay in time order, so earliest finishes give maximum capacity.
+function sessionCapacity(candidates) {
+  let count = 0;
+  let end = -Infinity;
+  for (const item of candidates) {
+    if (item.start < end + BUFFER) continue;
+    count++;
+    end = item.end;
+  }
+  return count;
+}
+
 export function planWeek({ events, history, settings, start, context = 'unspecified', reserved = [], now = Date.now() }) {
   validateSettings(settings);
   const end = +addDays(start, 7);
   const weekHistory = history.filter(item => item.start >= +start && item.start < end);
-  const completed = [...weekHistory.filter(item => item.status === 'completed'), ...reserved];
-  const completedMinutes = completed.reduce((sum, item) => sum + (item.end - item.start) / MINUTE, 0);
-  const windows = freeWindows([...events, ...completed], start, settings, now);
+  const imported = [];
+  const known = new Set([...weekHistory, ...reserved].map(item => item.id));
+  for (const item of events) {
+    if (item.status !== 'planned' || item.start < +start || item.start >= end || known.has(item.id)) continue;
+    imported.push(item);
+    known.add(item.id);
+  }
+  const fixed = [...weekHistory.filter(item => item.status === 'completed'), ...reserved, ...imported];
+  const fixedMinutes = fixed.reduce((sum, item) => sum + (item.end - item.start) / MINUTE, 0);
+  const windows = freeWindows([...events, ...fixed], start, settings, now);
   const candidates = [];
   const duration = settings.duration * MINUTE;
   for (const window of windows) {
@@ -92,11 +111,15 @@ export function planWeek({ events, history, settings, start, context = 'unspecif
     }
   }
   const planned = [];
-  let remaining = settings.hours * 60 - completedMinutes;
+  let remaining = settings.hours * 60 - fixedMinutes;
   while (remaining >= settings.duration && candidates.length) {
-    const rank = item => scoreTime(item.start, settings, history, context) - .08 * [...completed, ...planned].filter(other => dayKey(other.start) === dayKey(item.start)).length;
-    candidates.sort((a, b) => rank(b) - rank(a) || a.start - b.start);
-    const next = candidates.shift();
+    const rank = item => scoreTime(item.start, settings, history, context) - .08 * [...fixed, ...planned].filter(other => dayKey(other.start) === dayKey(item.start)).length;
+    const ranked = [...candidates].sort((a, b) => rank(b) - rank(a) || a.start - b.start);
+    const needed = Math.min(Math.floor(remaining / settings.duration), sessionCapacity(candidates));
+    const next = ranked.find(candidate => {
+      const available = candidates.filter(item => !overlaps(item, candidate, BUFFER));
+      return sessionCapacity(available) >= needed - 1;
+    });
     const samples = history.filter(item => band(item.start) === band(next.start)).length;
     planned.push({ ...next, id: `study-${next.start}-${settings.duration}`, title: 'Focused study', status: 'planned', context, reason: samples ? `Shaped by ${samples} ${band(next.start)} check-in${samples === 1 ? '' : 's'}` : band(next.start) === settings.preferred ? `Fits your ${settings.preferred} preference` : 'Fits a free block in your calendar' });
     remaining -= settings.duration;
@@ -104,7 +127,7 @@ export function planWeek({ events, history, settings, start, context = 'unspecif
       if (overlaps(candidates[i], next, BUFFER)) candidates.splice(i, 1);
     }
   }
-  return { sessions: planned.sort((a, b) => a.start - b.start), remainingMinutes: Math.max(0, remaining), freeMinutes: windows.reduce((sum, item) => sum + (item.end - item.start) / MINUTE, 0) };
+  return { sessions: [...imported, ...planned].sort((a, b) => a.start - b.start), remainingMinutes: Math.max(0, remaining), freeMinutes: windows.reduce((sum, item) => sum + (item.end - item.start) / MINUTE, 0) };
 }
 
 export function recordOutcome(history, session, status, context) {

@@ -61,7 +61,8 @@ test('export/import round trip preserves UTC times, stable IDs and escaped text'
   assert.equal(events.length,1);
   assert.equal(events[0].start,sessions[0].start);
   assert.equal(events[0].end,sessions[0].end);
-  assert.equal(events[0].title,'Study: Math, proofs; practice');
+  assert.equal(events[0].id,'stable');
+  assert.equal(events[0].title,'Math, proofs; practice');
   assert.match(raw,/UID:stable@margin.local/);
   assert.match(raw,/DTSTAMP:/);
 });
