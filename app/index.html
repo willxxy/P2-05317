@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#3157d5" />
+  <meta name="description" content="A private study planner that finds room in your calendar and learns your rhythm." />
+  <title>Margin · Your study week</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Margin home"><span class="brand-mark">m</span>margin<span class="brand-period">.</span></a>
+      <div class="workspace-label">YOUR WORKSPACE</div>
+      <a class="nav-item active" href="#week"><span aria-hidden="true">▦</span>Your week</a>
+      <button class="nav-item" id="preferences-button"><span aria-hidden="true">☷</span>Study preferences</button>
+      <button class="nav-item" id="calendar-button"><span aria-hidden="true">↗</span>Calendar connection</button>
+      <div class="sidebar-bottom">
+        <div class="privacy-mark" aria-hidden="true">⌁</div>
+        <strong>A little room to focus.</strong>
+        <p>Your calendar and study habits stay on this device.</p>
+        <span id="network-state" class="connection">Local workspace</span>
+      </div>
+    </aside>
+    <main id="week">
+      <header class="topbar"><span>Workspace <span class="breadcrumb">/</span> Your week</span><span class="device-note">PRIVATE BY DEFAULT</span></header>
+      <div class="page">
+        <div class="page-heading">
+          <div><div class="eyebrow" id="date-label">YOUR STUDY PLANNER</div><h1>Make room for focus.</h1><p>A study week that works around your life.</p></div>
+          <button class="button" id="import-button"><span aria-hidden="true">↥</span> Import calendar</button>
+        </div>
+        <div id="notice" role="status" class="notice" hidden></div>
+        <section class="overview" aria-label="Weekly overview" id="overview"></section>
+        <div class="workspace-grid">
+          <section class="calendar-panel panel" aria-label="Weekly schedule">
+            <div class="panel-heading"><div><h2>Your week, with room to study</h2><div class="week-controls"><button class="icon-button" id="previous-week" aria-label="Previous week">‹</button><span id="week-label"></span><button class="icon-button" id="next-week" aria-label="Next week">›</button><button class="text-button" id="today-button">This week</button></div></div><button class="button primary" id="plan-button"><span aria-hidden="true">✧</span> Replan week</button></div>
+            <div class="calendar-legend"><span><i class="key busy"></i>Calendar</span><span><i class="key study"></i>Study plan</span><span><i class="key done"></i>Completed</span><span class="timezone" id="timezone"></span></div>
+            <div class="calendar-scroll"><div id="calendar" class="calendar"></div></div>
+            <div class="calendar-footer"><span id="calendar-source">No calendar imported</span><button class="text-button" id="export-button">Export study plan <span aria-hidden="true">↗</span></button></div>
+          </section>
+          <aside class="right-rail">
+            <section class="panel next-panel"><div class="eyebrow">UP NEXT</div><div id="next-session"></div></section>
+            <section class="panel rhythm-panel"><div class="section-title"><h2>Your study rhythm</h2><span class="small-badge">ADAPTIVE</span></div><div id="rhythm"></div></section>
+            <section class="panel context-panel"><div class="section-title"><h2>Where you focus</h2><span aria-hidden="true">⌖</span></div><p>Plan for the place you’ll study.</p><label class="sr-only" for="context">Study environment</label><select id="context"><option value="unspecified">Not set</option><option value="home">Home</option><option value="library">Library</option><option value="campus">Campus</option><option value="other">Somewhere else</option></select><div class="location-actions"><button class="text-button" id="location-button">Enable location</button><button class="text-button" id="remember-place" hidden>Remember here</button></div><p class="small" id="location-status">Optional. Only active while this page is open.</p></section>
+          </aside>
+        </div>
+        <section class="sessions-section"><div class="section-title"><div><div class="eyebrow">ONE SESSION AT A TIME</div><h2>Your study sessions</h2></div><span class="muted" id="session-count"></span></div><div id="sessions" class="session-list"></div></section>
+        <footer class="page-footer"><span>Made for your rhythm.</span><span id="offline-status">Saved on this device</span></footer>
+      </div>
+    </main>
+  </div>
+  <dialog id="preferences-dialog"><form id="preferences-form"><div class="dialog-heading"><h2>Study preferences</h2><button type="button" class="icon-button" data-close aria-label="Close preferences">×</button></div><p>Start with a preference. Your check-ins shape what comes next.</p><label>Weekly study goal <span class="input-unit"><input name="hours" type="number" min="0.5" max="30" step="0.5" required /> hours</span></label><label>Session length<select name="duration"><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option><option value="90">90 minutes</option></select></label><label>Usually at my best<select name="preferred"><option value="morning">Morning · before noon</option><option value="afternoon">Afternoon · noon–5 pm</option><option value="evening">Evening · after 5 pm</option></select></label><div class="form-row"><label>Start studying after<input name="startHour" type="time" step="3600" required /></label><label>Finish studying by<input name="endHour" type="time" step="3600" required /></label></div><fieldset><legend>Study days</legend><div id="study-days" class="day-options"></div></fieldset><p class="small">We leave 15 minutes between study and calendar events.</p><button class="button primary full-width" type="submit">Save and replan</button></form></dialog>
+  <dialog id="calendar-dialog"><div class="dialog-heading"><h2>Your calendar</h2><button class="icon-button" data-close aria-label="Close calendar connection">×</button></div><p>Import an .ics file to plan around your commitments. Reimport when your calendar changes.</p><div class="instructions"><strong>Google Calendar</strong><p>On a computer: Settings → Import & export → Export. Unzip the download, then select an .ics file.</p><a href="https://support.google.com/calendar/answer/37111" target="_blank" rel="noreferrer">Google’s export guide ↗</a></div><div class="instructions"><strong>Apple Calendar</strong><p>On Mac: select a calendar → File → Export → Export.</p><a href="https://support.apple.com/guide/calendar/import-or-export-calendars-icl1023/mac" target="_blank" rel="noreferrer">Apple’s export guide ↗</a></div><button class="button primary full-width" id="choose-file">Choose .ics files</button><div id="sources" class="sources"></div><div class="dialog-footer"><button class="text-button" id="demo-button">Try a sample calendar</button><button class="text-button danger" id="clear-button">Clear this device’s data</button></div></dialog>
+  <dialog id="event-dialog"><div class="dialog-heading"><h2 id="event-title"></h2><button class="icon-button" data-close aria-label="Close event">×</button></div><div id="event-detail"></div></dialog>
+  <input id="calendar-file" type="file" accept=".ics,text/calendar" multiple hidden />
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
