@@ -49,7 +49,8 @@ export function readCalendar(text, rangeStart, rangeEnd, sourceId = 'calendar') 
   }
   for (const component of components) {
     if (component.hasProperty('recurrence-id') || component.getFirstPropertyValue('status') === 'CANCELLED') continue;
-    const event = new ICAL.Event(component);
+    const exceptions = components.filter(item => item.hasProperty('recurrence-id') && item.getFirstPropertyValue('uid') === component.getFirstPropertyValue('uid'));
+    const event = new ICAL.Event(component, { exceptions, strictExceptions: true });
     if (!event.startDate) throw new Error('A calendar event is missing its start date.');
     if (!event.isRecurring()) {
       add(event, event.startDate, event.endDate);
@@ -61,14 +62,14 @@ export function readCalendar(text, rangeStart, rangeEnd, sourceId = 'calendar') 
       if (++iterations > MAX_OCCURRENCES) throw new Error('This calendar has too many repetitions. Export a shorter date range.');
       if (+occurrence.toJSDate() >= +rangeEnd) break;
       const details = event.getOccurrenceDetails(occurrence);
-      add(details.item, details.startDate, details.endDate, occurrence.toString());
+      add(details.item, details.startDate, details.endDate, +occurrence.toJSDate());
     }
   }
   // Include exceptions moved into the window from outside it; Map removes duplicates.
   for (const component of components.filter(item => item.hasProperty('recurrence-id'))) {
     if (component.getFirstPropertyValue('status') === 'CANCELLED') continue;
     const event = new ICAL.Event(component);
-    add(event, event.startDate, event.endDate, event.recurrenceId.toString());
+    add(event, event.startDate, event.endDate, +event.recurrenceId.toJSDate());
   }
   return [...events.values()].sort((a, b) => a.start - b.start);
 }
@@ -78,7 +79,7 @@ export function exportCalendar(sessions, now = new Date()) {
   calendar.updatePropertyWithValue('version', '2.0');
   calendar.updatePropertyWithValue('prodid', '-//Margin//Study planner//EN');
   calendar.updatePropertyWithValue('calscale', 'GREGORIAN');
-  for (const session of sessions.filter(item => item.status !== 'skipped')) {
+  for (const session of sessions.filter(item => ['planned', 'completed'].includes(item.status))) {
     const component = new ICAL.Component('vevent');
     const event = new ICAL.Event(component);
     event.uid = `${session.id}@margin.local`;

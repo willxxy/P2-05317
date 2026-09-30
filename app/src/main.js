@@ -1,5 +1,5 @@
 import './style.css';
-import { defaults, bands, weekStart, addDays, dayKey, band, planWeek, freeWindows, scoreTime, recordOutcome, distance, validateSettings, MINUTE } from './planner.js';
+import { defaults, bands, weekStart, addDays, dayKey, band, planWeek, freeWindows, scoreTime, recordOutcome, distance, validateSettings, canSchedule, learningHistory, MINUTE } from './planner.js';
 import { readCalendar, exportCalendar, sampleCalendar, MAX_FILE_BYTES } from './calendar.js';
 
 const $ = selector => document.querySelector(selector);
@@ -9,6 +9,7 @@ const time = date => new Date(date).toLocaleTimeString('en-US', { hour: 'numeric
 const hours = minutes => Number((minutes / 60).toFixed(1));
 const capital = value => value.charAt(0).toUpperCase() + value.slice(1);
 const contextNames = { unspecified: 'Not set', home: 'Home', library: 'Library', campus: 'Campus', other: 'Somewhere else' };
+const changeReasons = { '': 'No reason given', temporary: 'Temporary conflict', work: 'Work', caregiving: 'Caregiving', commute: 'Commute', accessibility: 'Accessibility need', preference: 'Lasting time preference' };
 const STORAGE_KEY = 'margin.v1';
 let week = weekStart();
 let storageWarning = '';
@@ -19,7 +20,7 @@ let position = null;
 let toastTimer;
 
 function freshState(withSample = false) {
-  return { version: 1, settings: { ...defaults }, sources: withSample ? [{ id: 'sample', name: 'Sample calendar', text: sampleCalendar(weekStart()), sample: true }] : [], history: [], plans: {}, context: 'unspecified', places: [] };
+  return { version: 1, settings: { ...defaults }, sources: withSample ? [{ id: 'sample', name: 'Sample calendar', text: sampleCalendar(weekStart()), sample: true }] : [], blocks: [], history: [], plans: {}, context: 'unspecified', places: [] };
 }
 
 function load() {
@@ -27,8 +28,10 @@ function load() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return freshState(true);
     const saved = JSON.parse(raw);
+    saved.settings = { ...defaults, ...saved.settings };
+    saved.blocks ??= [];
     validateSettings(saved.settings);
-    if (saved.version !== 1 || !Array.isArray(saved.sources) || !Array.isArray(saved.history) || !Array.isArray(saved.places) || !saved.plans || typeof saved.plans !== 'object' || !Object.hasOwn(contextNames, saved.context)) throw new Error('Unrecognized saved data.');
+    if (saved.version !== 1 || !Array.isArray(saved.sources) || !Array.isArray(saved.blocks) || !Array.isArray(saved.history) || !Array.isArray(saved.places) || !saved.plans || typeof saved.plans !== 'object' || !Object.hasOwn(contextNames, saved.context)) throw new Error('Unrecognized saved data.');
     return saved;
   } catch {
     storageWarning = 'Saved data could not be loaded. This workspace is temporary; clear device data in Calendar connection to start again.';
@@ -38,13 +41,33 @@ function load() {
 let state = load();
 
 function eventsFor(data, start) {
-  return data.sources.flatMap(source => readCalendar(source.text, start, addDays(start, 7), source.id));
+  const events = data.sources.flatMap(source => readCalendar(source.text, start, addDays(start, 7), source.id))
+    .filter(item => !data.history.some(outcome => outcome.id === item.id && ['skipped', 'moved'].includes(outcome.status)));
+  // Include the previous day so overnight commitments block the start of the week.
+  for (let index = -1; index < 7; index++) {
+    const date = dayKey(addDays(start, index));
+    for (const block of data.blocks) {
+      const repeats = block.repeat === 'weekly' && date >= block.date && new Date(`${date}T00:00`).getDay() === new Date(`${block.date}T00:00`).getDay();
+      if (date !== block.date && !repeats) continue;
+      const from = new Date(`${date}T${block.start}`);
+      let until = new Date(`${date}T${block.end}`);
+      if (+until <= +from) until = addDays(until, 1);
+      events.push({ id: `${block.id}:${date}`, title: block.title, start: +from, end: +until });
+    }
+  }
+  return events;
 }
 
 function rebuild(data, start) {
   const key = dayKey(start);
-  const reserved = (data.plans[key] || []).filter(item => item.start < Date.now() && !data.history.some(outcome => outcome.id === item.id));
-  const result = planWeek({ events: eventsFor(data, start), history: data.history, settings: data.settings, start, context: data.context, reserved });
+  const events = eventsFor(data, start);
+  const reserved = [];
+  for (const item of data.plans[key] || []) {
+    if (!item.pinned && item.start >= Date.now()) continue;
+    if (data.history.some(outcome => outcome.id === item.id)) continue;
+    if (canSchedule(item, [...events, ...reserved], start, data.settings)) reserved.push(item);
+  }
+  const result = planWeek({ events, history: data.history, settings: data.settings, start, context: data.context, reserved });
   data.plans[key] = [...reserved, ...result.sessions];
   return result;
 }
@@ -94,9 +117,10 @@ function render() {
   try { events = eventsFor(state, week); } catch (error) { calendarError = error.message; }
   const sessions = weekSessions();
   const completed = sessions.filter(item => item.status === 'completed');
-  const active = sessions.filter(item => item.status !== 'skipped');
+  const active = sessions.filter(item => ['planned', 'completed'].includes(item.status));
+  const learned = learningHistory(state.history, state.settings);
   const doneMinutes = completed.reduce((sum, item) => sum + (item.end - item.start) / MINUTE, 0);
-  const plannedMinutes = active.reduce((sum, item) => sum + (item.end - item.start) / MINUTE, 0);
+  const plannedMinutes = active.filter(item => item.status === 'completed' || item.end > Date.now()).reduce((sum, item) => sum + (item.end - item.start) / MINUTE, 0);
   const freeMinutes = freeWindows(events, week, state.settings).reduce((sum, item) => sum + (item.end - item.start) / MINUTE, 0);
   const best = [...bands].sort((a, b) => {
     const date = hour => new Date(week).setHours(hour);
@@ -104,7 +128,7 @@ function render() {
   })[0];
   const goal = state.settings.hours;
   const stat = (label, value, note, symbol, progress) => `<div class="stat-card"><div class="stat-label">${label}</div><span class="stat-symbol" aria-hidden="true">${symbol}</span><div class="stat-value">${value}</div><p>${note}</p>${progress !== undefined ? `<div class="progress-track"><i style="width:${Math.min(100, progress)}%"></i></div>` : ''}</div>`;
-  $('#overview').innerHTML = stat('Study this week', `${hours(doneMinutes)} <span>/ ${goal} hrs</span>`, `${hours(plannedMinutes)} hrs planned · ${completed.length} completed`, '◷', doneMinutes / (goal * 60) * 100) + stat('Room in your week', calendarError ? '—' : `${hours(freeMinutes)} <span>hrs free</span>`, 'Within your remaining study hours', '▦') + stat('Your best time', capital(best), state.history.length ? `Based on ${state.history.length} check-in${state.history.length === 1 ? '' : 's'}` : 'Your starting preference · still learning', '✧');
+  $('#overview').innerHTML = stat('Study this week', `${hours(doneMinutes)} <span>/ ${goal} hrs</span>`, `${hours(plannedMinutes)} hrs planned · ${completed.length} completed`, '◷', doneMinutes / (goal * 60) * 100) + stat('Room in your week', calendarError ? '—' : `${hours(freeMinutes)} <span>hrs free</span>`, 'Within your remaining study hours', '▦') + stat('Suggested time', capital(best), learned.length ? `Based on ${learned.length} learning check-in${learned.length === 1 ? '' : 's'}` : 'Your stated preference · editable', '✧');
   $('#date-label').textContent = format(Date.now(), { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase();
   $('#week-label').textContent = `${format(week, { month: 'short', day: 'numeric' })} – ${format(addDays(week, 6), { month: 'short', day: 'numeric', year: 'numeric' })}`;
   $('#timezone').textContent = Intl.DateTimeFormat().resolvedOptions().timeZone.split('/').pop().replaceAll('_', ' ');
@@ -112,7 +136,7 @@ function render() {
   $('#calendar-source').textContent = state.sources.length ? state.sources.some(source => source.sample) ? 'Sample calendar · device only' : `${state.sources.length} imported calendar${state.sources.length === 1 ? '' : 's'} · file snapshot` : 'No calendar imported';
   $('#plan-button').disabled = Boolean(calendarError) || +addDays(week, 7) <= Date.now();
   $('#export-button').disabled = !active.length || Boolean(calendarError);
-  const messages = [storageWarning, calendarError, state.sources.some(source => source.sample) ? 'You’re exploring a sample calendar. Import yours to make this week your own.' : !state.sources.length ? 'No calendar imported. Plans assume your study hours are free.' : '', plannedMinutes < goal * 60 && +addDays(week, 7) > Date.now() && !calendarError ? `${hours(goal * 60 - plannedMinutes)} hrs of your goal remain unplanned. Try shorter sessions or more study days.` : ''].filter(Boolean);
+  const messages = [storageWarning, calendarError, state.sources.some(source => source.sample) ? 'You’re exploring a sample calendar. Import yours to make this week your own.' : !state.sources.length ? 'No calendar imported. Add blocked time to reserve commitments.' : '', plannedMinutes < goal * 60 && +addDays(week, 7) > Date.now() && !calendarError ? `${hours(goal * 60 - plannedMinutes)} hrs of your goal remain unplanned. Try shorter sessions or more study days.` : ''].filter(Boolean);
   $('#notice').hidden = !messages.length;
   $('#notice').textContent = messages.join(' ');
   renderCalendar(events.filter(item => !active.some(session => session.id === item.id)), active);
@@ -124,8 +148,15 @@ function render() {
 }
 
 function renderCalendar(events, sessions) {
-  const from = Math.min(8, state.settings.startHour);
-  const until = Math.max(20, state.settings.endHour);
+  let from = Math.min(8, state.settings.startHour);
+  let until = Math.max(20, state.settings.endHour);
+  for (const item of [...events, ...sessions]) {
+    const start = new Date(item.start);
+    const end = new Date(item.end);
+    const overnight = dayKey(start) !== dayKey(end);
+    from = Math.min(from, overnight ? 0 : start.getHours());
+    until = Math.max(until, overnight ? 24 : end.getHours() + (end.getMinutes() || end.getSeconds() || end.getMilliseconds() ? 1 : 0));
+  }
   const span = until - from;
   const today = dayKey(Date.now());
   const days = Array.from({ length: 7 }, (_, i) => addDays(week, i));
@@ -160,7 +191,7 @@ function renderCalendar(events, sessions) {
 
 function outcomeButtons(item) {
   if (item.status !== 'planned') return `<span class="status-label ${item.status}">${capital(item.status)}</span><button class="text-button" data-undo="${escape(item.id)}">Undo</button>`;
-  return `<button class="text-button" data-outcome="skipped" data-id="${escape(item.id)}">Skip</button><button class="button" data-outcome="completed" data-id="${escape(item.id)}">Mark done</button>`;
+  return `<button class="text-button" data-change="move" data-id="${escape(item.id)}">Move</button><button class="text-button" data-change="skip" data-id="${escape(item.id)}">Skip</button><button class="button" data-outcome="completed" data-id="${escape(item.id)}">Mark done</button>`;
 }
 
 function renderSessions(sessions) {
@@ -174,11 +205,12 @@ function renderNext(sessions) {
 }
 
 function renderRhythm() {
-  $('#rhythm').innerHTML = '<p>' + (state.history.length ? 'Completed sessions by time of day. Skips also shape your next plan.' : 'Check in after a session. Your plan learns when you follow through.') + '</p>' + bands.map(period => {
-    const history = state.history.filter(item => band(item.start) === period);
+  const learned = learningHistory(state.history, state.settings);
+  $('#rhythm').innerHTML = '<p>Completed sessions among check-ins included in learning. Temporary or unexplained changes are excluded by default.</p>' + bands.map(period => {
+    const history = learned.filter(item => band(item.start) === period);
     const done = history.filter(item => item.status === 'completed').length;
     return `<div class="rhythm-row"><span>${capital(period)}</span><div class="rhythm-bar"><i style="width:${history.length ? done / history.length * 100 : 0}%"></i></div><b>${history.length ? `${done}/${history.length}` : '—'}</b></div>`;
-  }).join('');
+  }).join('') + '<button class="text-button" data-learning>Review learning</button>';
 }
 
 function showPreferences() {
@@ -202,17 +234,105 @@ function showEvent(id) {
   $('#event-dialog').showModal();
 }
 
-function checkIn(id, status) {
+function checkIn(id, status, reason = '') {
   const session = weekSessions().find(item => item.id === id && item.status === 'planned');
-  if (!session) throw new Error('This session is no longer planned.');
+  if (!session) { toast('This session is no longer planned.'); return false; }
   if (!update(next => {
-    next.history = recordOutcome(next.history, session, status, next.context);
+    next.history = recordOutcome(next.history, session, status, next.context, reason);
     next.plans[dayKey(week)] = next.plans[dayKey(week)].filter(item => item.id !== id);
   }, 'all')) return false;
   $('#event-dialog').close();
   toast(status === 'completed' ? 'Session completed. Your next plan learns from it.' : 'Session skipped. We’ll look for another time.');
   return true;
 }
+
+function showChange(id, action) {
+  const session = weekSessions().find(item => item.id === id && item.status === 'planned');
+  if (!session) { toast('This session is no longer planned.'); return; }
+  const form = $('#change-form');
+  form.dataset.id = id;
+  form.dataset.action = action;
+  $('#change-title').textContent = action === 'move' ? 'Move session' : 'Skip session';
+  $('#move-time').hidden = action !== 'move';
+  form.elements.start.disabled = action !== 'move';
+  form.elements.start.value = `${dayKey(session.start)}T${new Date(session.start).toTimeString().slice(0, 5)}`;
+  form.elements.reason.innerHTML = Object.entries(changeReasons).map(([value, label]) => `<option value="${value}">${label}</option>`).join('');
+  $('#event-dialog').close();
+  $('#change-dialog').showModal();
+}
+
+$('#change-form').onsubmit = event => {
+  event.preventDefault();
+  const form = event.target;
+  const reason = form.elements.reason.value;
+  if (form.dataset.action === 'skip') {
+    if (checkIn(form.dataset.id, 'skipped', reason)) $('#change-dialog').close();
+    return;
+  }
+  const session = weekSessions().find(item => item.id === form.dataset.id && item.status === 'planned');
+  if (!session) { toast('This session is no longer planned.'); return; }
+  const start = +new Date(form.elements.start.value);
+  if (start === session.start) { toast('Choose a different start time.'); return; }
+  const moved = { ...session, start, end: start + session.end - session.start, pinned: true, reason: 'Time chosen by you' };
+  if (!Number.isFinite(start) || start < Date.now() || start < +week || moved.end > +addDays(week, 7)) {
+    toast('Choose a future time within the displayed week.');
+    return;
+  }
+  if (update(next => {
+    const occupied = [...eventsFor(next, week), ...weekSessions().filter(item => ['planned', 'completed'].includes(item.status))];
+    if (!canSchedule(moved, occupied, week, next.settings)) throw new Error('Choose a time within your study hours, clear of commitments and transition breaks.');
+    moved.id = crypto.randomUUID();
+    next.history = recordOutcome(next.history, { ...session, movedTo: moved.id }, 'moved', next.context, reason);
+    next.plans[dayKey(week)] = [...next.plans[dayKey(week)].filter(item => item.id !== session.id), moved];
+  }, 'all')) {
+    $('#change-dialog').close();
+    toast('Session moved. Your chosen time stays fixed unless constraints change.');
+  }
+};
+
+function renderBlocks() {
+  $('#blocks').innerHTML = state.blocks.map(block => `<div class="source-row"><span>${escape(block.title)}<br>${escape(block.date)} · ${escape(block.start)}–${escape(block.end)} · ${block.repeat === 'weekly' ? 'Weekly' : 'Once'}</span><button class="text-button" data-edit-block="${escape(block.id)}">Edit</button><button class="text-button danger" data-remove-block="${escape(block.id)}">Remove</button></div>`).join('') || '<p>No blocked time added.</p>';
+}
+
+$('#blocks-button').onclick = () => {
+  const form = $('#block-form');
+  form.reset();
+  delete form.dataset.id;
+  form.elements.date.value = dayKey(Date.now());
+  renderBlocks();
+  $('#blocks-dialog').showModal();
+};
+$('#block-form').onsubmit = event => {
+  event.preventDefault();
+  const form = event.target;
+  const block = { ...Object.fromEntries(new FormData(form)), id: form.dataset.id || crypto.randomUUID() };
+  if (update(next => { next.blocks = [...next.blocks.filter(item => item.id !== block.id), block]; }, 'all')) {
+    delete form.dataset.id;
+    form.reset();
+    form.elements.date.value = dayKey(Date.now());
+    renderBlocks();
+    toast('Blocked time saved. Plans respect it before preferences.');
+  }
+};
+
+function showLearning() {
+  $('#learning-items').innerHTML = state.history.map(item => {
+    const learning = item.learning ?? (item.status === 'completed' ? 'use' : 'ignore');
+    return `<label>${escape(format(item.start, { month: 'short', day: 'numeric' }))} · ${time(item.start)} · ${capital(item.status)}<span class="small"> · ${escape(changeReasons[item.changeReason] || 'No reason given')}</span><select data-learn="${escape(item.id)}"><option value="ignore" ${learning === 'ignore' ? 'selected' : ''}>Exclude from learning</option><option value="use" ${learning === 'use' ? 'selected' : ''}>${item.status === 'completed' ? 'Favor this time' : 'Prefer other times'}</option></select></label>`;
+  }).join('') || '<p>No check-ins yet. Edit your starting preferences or move any planned session.</p>';
+  if (!$('#learning-dialog').open) $('#learning-dialog').showModal();
+}
+$('#learning-items').onchange = event => {
+  const id = event.target.dataset.learn;
+  if (id && update(next => { next.history.find(item => item.id === id).learning = event.target.value; }, 'all')) toast('Learning corrected.');
+  showLearning();
+};
+$('#reset-learning').onclick = () => {
+  if (update(next => { next.history = next.history.map(item => ({ ...item, learning: 'ignore' })); }, 'all')) {
+    showLearning();
+    toast('Learning reset. Check-ins and constraints kept.');
+  }
+};
 
 $('#preferences-button').onclick = showPreferences;
 for (const id of ['import-button', 'calendar-button']) $(`#${id}`).onclick = () => $('#calendar-dialog').showModal();
@@ -221,7 +341,7 @@ for (const button of document.querySelectorAll('[data-close]')) button.onclick =
 $('#preferences-form').onsubmit = event => {
   event.preventDefault();
   const form = new FormData(event.target);
-  const settings = { hours: Number(form.get('hours')), duration: Number(form.get('duration')), preferred: form.get('preferred'), startHour: Number(form.get('startHour').split(':')[0]), endHour: Number(form.get('endHour').split(':')[0]), days: form.getAll('days').map(Number) };
+  const settings = { hours: Number(form.get('hours')), duration: Number(form.get('duration')), preferred: form.get('preferred'), startHour: Number(form.get('startHour').split(':')[0]), endHour: Number(form.get('endHour').split(':')[0]), days: form.getAll('days').map(Number), bufferMinutes: Number(form.get('bufferMinutes')), learning: form.get('learning') };
   try { validateSettings(settings); } catch (error) { toast(error.message); return; }
   if (update(next => { next.settings = settings; }, 'all')) { $('#preferences-dialog').close(); toast('Preferences saved. Your study plan is updated.'); }
 };
@@ -230,7 +350,7 @@ $('#context').onchange = event => { if (!update(next => { next.context = event.t
 
 function navigate(start) {
   week = start;
-  if (!Object.hasOwn(state.plans, dayKey(week)) && +addDays(week, 7) > Date.now()) update(() => {});
+  if (+addDays(week, 7) > Date.now()) update(() => {});
   else render();
 }
 $('#previous-week').onclick = () => navigate(addDays(week, -7));
@@ -253,10 +373,6 @@ $('#calendar-file').onchange = async event => {
       const wasSample = next.sources.some(source => source.sample);
       next.sources = [...next.sources.filter(source => !source.sample && !sources.some(item => item.name === source.name)), ...sources];
       if (wasSample) { next.history = []; next.plans = {}; }
-      else {
-        // New commitments invalidate stale plans, including already-started sessions.
-        next.plans = Object.fromEntries(Object.keys(next.plans).map(key => [key, []]));
-      }
     }, 'all')) { $('#calendar-dialog').close(); toast(`${files.length} calendar${files.length === 1 ? '' : 's'} imported. Study times updated.`); }
   } catch (error) { toast(`Import failed: ${error.message}`); }
 };
@@ -265,7 +381,7 @@ $('#demo-button').onclick = () => {
   if (update(next => { next.sources = freshState(true).sources; }, 'all')) { $('#calendar-dialog').close(); toast('Sample calendar loaded.'); }
 };
 $('#export-button').onclick = () => {
-  const sessions = weekSessions().filter(item => item.status !== 'skipped');
+  const sessions = weekSessions().filter(item => ['planned', 'completed'].includes(item.status));
   if (!sessions.length) return;
   const url = URL.createObjectURL(new Blob([exportCalendar(sessions)], {type:'text/calendar;charset=utf-8'}));
   const link = document.createElement('a');
@@ -295,11 +411,30 @@ document.addEventListener('click', event => {
   if (!button) return;
   if (button.dataset.event) showEvent(button.dataset.event);
   if (button.hasAttribute('data-preferences')) showPreferences();
+  if (button.dataset.change) showChange(button.dataset.id, button.dataset.change);
+  if (button.hasAttribute('data-learning')) showLearning();
+  if (button.dataset.editBlock) {
+    const block = state.blocks.find(item => item.id === button.dataset.editBlock);
+    const form = $('#block-form');
+    form.dataset.id = block.id;
+    for (const [name, value] of Object.entries(block)) if (name !== 'id') form.elements[name].value = value;
+  }
+  if (button.dataset.removeBlock && update(next => {
+    next.blocks = next.blocks.filter(item => item.id !== button.dataset.removeBlock);
+  }, 'all')) renderBlocks();
   if (button.dataset.outcome) checkIn(button.dataset.id, button.dataset.outcome);
   if (button.dataset.undo && update(next => {
     const original = next.history.find(item => item.id === button.dataset.undo);
+    if (original?.movedTo) {
+      if (next.history.some(item => item.id === original.movedTo)) throw new Error('Undo the replacement session’s check-in first.');
+      next.plans[dayKey(week)] = next.plans[dayKey(week)].filter(item => item.id !== original.movedTo);
+    }
     next.history = next.history.filter(item => item.id !== button.dataset.undo);
-    if (original) next.plans[dayKey(week)].push({ ...original, status: 'planned' });
+    if (original) {
+      const restored = { ...original, status: 'planned', pinned: true };
+      delete restored.movedTo;
+      next.plans[dayKey(week)].push(restored);
+    }
   }, 'all')) { $('#event-dialog').close(); toast('Check-in undone.'); }
   if (button.dataset.remove) update(next => {
     if (next.sources.find(source => source.id === button.dataset.remove)?.sample) { next.history = []; next.plans = {}; }
@@ -338,14 +473,20 @@ $('#remember-place').onclick = () => {
 };
 window.addEventListener('pagehide', stopLocation);
 window.addEventListener('storage', event => { if (event.key === STORAGE_KEY) { state = load(); render(); } });
+function refresh() {
+  if (!document.hidden && !document.querySelector('dialog[open]')) navigate(week);
+}
+window.addEventListener('focus', refresh);
+document.addEventListener('visibilitychange', refresh);
+setInterval(refresh, MINUTE);
 function networkStatus() { $('#network-state').textContent = navigator.onLine ? 'Local workspace' : 'Working offline'; }
 window.addEventListener('online', networkStatus);
 window.addEventListener('offline', networkStatus);
 networkStatus();
 
 try {
-  if (!Object.hasOwn(state.plans, dayKey(week))) { rebuild(state, week); save(state); }
-  else render();
+  rebuild(state, week);
+  save(state);
 } catch (error) { storageWarning = error.message; render(); }
 
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {

@@ -51,9 +51,35 @@
       </div>
     </main>
   </div>
-  <dialog id="preferences-dialog"><form id="preferences-form"><div class="dialog-heading"><h2>Study preferences</h2><button type="button" class="icon-button" data-close aria-label="Close preferences">×</button></div><p>Start with a preference. Your check-ins shape what comes next.</p><label>Weekly study goal <span class="input-unit"><input name="hours" type="number" min="0.5" max="30" step="0.5" required /> hours</span></label><label>Session length<select name="duration"><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option><option value="90">90 minutes</option></select></label><label>Usually at my best<select name="preferred"><option value="morning">Morning · before noon</option><option value="afternoon">Afternoon · noon–5 pm</option><option value="evening">Evening · after 5 pm</option></select></label><div class="form-row"><label>Start studying after<input name="startHour" type="time" step="3600" required /></label><label>Finish studying by<input name="endHour" type="time" step="3600" required /></label></div><fieldset><legend>Study days</legend><div id="study-days" class="day-options"></div></fieldset><p class="small">We leave 15 minutes between study and calendar events.</p><button class="button primary full-width" type="submit">Save and replan</button></form></dialog>
+  <dialog id="preferences-dialog"><form id="preferences-form"><div class="dialog-heading"><h2>Study preferences</h2><button type="button" class="icon-button" data-close aria-label="Close preferences">×</button></div><p>Study days, hours, blocked time, and transition breaks always take priority. Move any session to edit your starting plan.</p><label>Weekly study goal <span class="input-unit"><input name="hours" type="number" min="0.5" max="30" step="0.5" required /> hours</span></label><label>Session length<select name="duration"><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option><option value="90">90 minutes</option></select></label><label>Usually at my best<select name="preferred"><option value="morning">Morning · before noon</option><option value="afternoon">Afternoon · noon–5 pm</option><option value="evening">Evening · after 5 pm</option></select></label><div class="form-row"><label>Start studying after<input name="startHour" type="time" step="3600" required /></label><label>Finish studying by<input name="endHour" type="time" step="3600" required /></label></div><fieldset><legend>Study days</legend><div id="study-days" class="day-options"></div></fieldset><label>Transition break (minutes)<input name="bufferMinutes" type="number" min="0" max="180" required /></label><p class="small">Time between study and other sessions or commitments, for travel, rest, or accessibility needs.</p><label>Apply preferences<select name="learning"><option value="adaptive">Learn from selected check-ins</option><option value="stated">Use my stated preference only</option></select></label><div class="dialog-footer"><button type="button" class="text-button" id="blocks-button">Manage blocked time</button><button type="button" class="text-button" data-learning>Review learning</button></div><button class="button primary full-width" type="submit">Save and replan</button></form></dialog>
   <dialog id="calendar-dialog"><div class="dialog-heading"><h2>Your calendar</h2><button class="icon-button" data-close aria-label="Close calendar connection">×</button></div><p>Import an .ics file to plan around your commitments. Reimport when your calendar changes.</p><div class="instructions"><strong>Google Calendar</strong><p>On a computer: Settings → Import & export → Export. Unzip the download, then select an .ics file.</p><a href="https://support.google.com/calendar/answer/37111" target="_blank" rel="noreferrer">Google’s export guide ↗</a></div><div class="instructions"><strong>Apple Calendar</strong><p>On Mac: select a calendar → File → Export → Export.</p><a href="https://support.apple.com/guide/calendar/import-or-export-calendars-icl1023/mac" target="_blank" rel="noreferrer">Apple’s export guide ↗</a></div><button class="button primary full-width" id="choose-file">Choose .ics files</button><div id="sources" class="sources"></div><div class="dialog-footer"><button class="text-button" id="demo-button">Try a sample calendar</button><button class="text-button danger" id="clear-button">Clear this device’s data</button></div></dialog>
   <dialog id="event-dialog"><div class="dialog-heading"><h2 id="event-title"></h2><button class="icon-button" data-close aria-label="Close event">×</button></div><div id="event-detail"></div></dialog>
+  <dialog id="blocks-dialog">
+    <div class="dialog-heading"><h2>Blocked time</h2><button class="icon-button" data-close aria-label="Close blocked time">×</button></div>
+    <p>Reserve work, caregiving, commuting, or accessibility time. Overnight blocks end the next day. Weekly blocks repeat from the chosen date.</p>
+    <div id="blocks"></div>
+    <form id="block-form">
+      <label>Commitment<select name="title"><option>Work</option><option>Caregiving</option><option>Commute</option><option>Accessibility / rest</option><option>Other commitment</option></select></label>
+      <label>Date<input name="date" type="date" required /></label>
+      <div class="form-row"><label>From<input name="start" type="time" required /></label><label>Until<input name="end" type="time" required /></label></div>
+      <label>Repeat<select name="repeat"><option value="once">Once</option><option value="weekly">Weekly</option></select></label>
+      <button class="button primary full-width" type="submit">Save blocked time</button>
+    </form>
+  </dialog>
+  <dialog id="change-dialog"><form id="change-form">
+    <div class="dialog-heading"><h2 id="change-title">Change session</h2><button type="button" class="icon-button" data-close aria-label="Close session change">×</button></div>
+    <label id="move-time">New start in this week<input name="start" type="datetime-local" required /></label>
+    <label>Reason (optional)<select name="reason"></select></label>
+    <p>Only “Lasting time preference” changes learning. Other reasons affect this plan only. Add recurring commitments under blocked time.</p>
+    <button class="button primary full-width" type="submit">Save and replan</button>
+  </form></dialog>
+  <dialog id="learning-dialog">
+    <div class="dialog-heading"><h2>Review learning</h2><button class="icon-button" data-close aria-label="Close learning review">×</button></div>
+    <p>Included completions favor their time; included skips and moves favor other times. Suggestions also use weekday and environment. Constraints always apply.</p>
+    <p>To override suggestions, choose “Use my stated preference only” in Study preferences. Reset excludes past check-ins without deleting them.</p>
+    <div id="learning-items"></div>
+    <button class="text-button" id="reset-learning">Reset learned preferences</button>
+  </dialog>
   <input id="calendar-file" type="file" accept=".ics,text/calendar" multiple hidden />
   <div id="toast" class="toast" role="status" hidden></div>
   <script type="module" src="/src/main.js"></script>

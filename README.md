@@ -1,6 +1,7 @@
-# Margin
+#Margin
 
 A private, adaptive study planner. Plain JavaScript, CSS, Vite, and `ical.js`. No account, backend, API key, or runtime network dependency.
+
 
 ## Run
 
@@ -27,8 +28,8 @@ Wait for **ready offline** in the footer. The cached app then reloads without th
 
 1. Import one or more `.ics` files from Google or Apple Calendar. Google exports a ZIP; extract it first. Importing your first calendar replaces the sample and its check-ins.
 2. Set your weekly goal, session length, preferred time, study hours, and study days.
-3. The planner automatically fits sessions into free time, leaving 15-minute buffers. It never schedules new sessions in the past.
-4. Mark sessions done or skipped. Future plans adapt; Undo reverses a check-in. Sessions without feedback remain pending rather than being treated as failures.
+3. In Study preferences, add one-time or weekly blocked time for work, caregiving, commuting, or accessibility needs. Set transition breaks (15 minutes by default). These constraints always apply before learned preferences.
+4. Move sessions within the displayed week or skip them, with an optional reason. Only changes marked as lasting preferences affect learning by default. Review learning to correct or reset individual signals without losing check-ins. Choose “Use my stated preference only” to disable learning. Undo reverses a check-in; moved sessions keep their chosen time unless constraints change.
 5. Export the displayed week's study sessions as `.ics`, then import them into your calendar app. Reimport your calendar when commitments change. Importing the same filename replaces its previous snapshot. Reimported study sessions keep their times and count toward your goal once, matched by their exported calendar IDs.
 6. Choose an environment manually, or enable browser location. Choose a label and **Remember here** to recognize that place later. Location runs only while the page is open; it must be enabled again after reload.
 
@@ -36,7 +37,7 @@ Wait for **ready offline** in the footer. The cached app then reloads without th
 
 Each candidate uses a score: **70% time-of-day history + 20% weekday history + 10% environment/time history**. A smoothed completion rate adds two prior observations to avoid overreacting to a single check-in. Preferred times begin with a 0.70 prior; other times use 0.45. Weekday and environment priors are 0.50. Each session already on a day subtracts 0.08 to spread study time across the week. Ties favor earlier slots. A candidate is chosen only if it preserves enough room for the remaining achievable goal.
 
-These weights are prototype choices, not a validated prediction of behavior. The selected environment is an assumption for planned sessions, not a forecast of future location. Only explicit completed/skipped feedback trains the scores.
+These weights are prototype choices, not a validated prediction of behavior. The selected environment is an assumption for planned sessions, not a forecast of future location. Only check-ins included in learning train the scores. Completions are included by default; skips and moves require a lasting preference reason or explicit inclusion in Review learning.
 
 ## Boundaries
 
